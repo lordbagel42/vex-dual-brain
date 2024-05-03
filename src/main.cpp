@@ -1,4 +1,8 @@
 #include "main.h"
+#include "pros/link.h"
+#include "pros/serial.hpp"
+#include <bitset>
+#include <iostream>
 
 /**
  * A callback function for LLEMU's center button.
@@ -7,13 +11,13 @@
  * "I was pressed!" and nothing.
  */
 void on_center_button() {
-	static bool pressed = false;
-	pressed = !pressed;
-	if (pressed) {
-		pros::lcd::set_text(2, "I was pressed!");
-	} else {
-		pros::lcd::clear_line(2);
-	}
+  static bool pressed = false;
+  pressed = !pressed;
+  if (pressed) {
+    pros::lcd::set_text(2, "I was pressed!");
+  } else {
+    pros::lcd::clear_line(2);
+  }
 }
 
 /**
@@ -22,12 +26,7 @@ void on_center_button() {
  * All other competition modes are blocked by initialize; it is recommended
  * to keep execution time for this mode under a few seconds.
  */
-void initialize() {
-	pros::lcd::initialize();
-	pros::lcd::set_text(1, "Hello PROS User!");
-
-	pros::lcd::register_btn1_cb(on_center_button);
-}
+void initialize() {}
 
 /**
  * Runs while the robot is in the disabled state of Field Management System or
@@ -61,33 +60,50 @@ void competition_initialize() {}
 void autonomous() {}
 
 /**
- * Runs the operator control code. This function will be started in its own task
- * with the default priority and stack size whenever the robot is enabled via
- * the Field Management System or the VEX Competition Switch in the operator
- * control mode.
- *
- * If no competition control is connected, this function will run immediately
- * following initialize().
- *
- * If the robot is disabled or communications is lost, the
- * operator control task will be stopped. Re-enabling the robot will restart the
- * task, not resume it from where it left off.
+SEND CODE
  */
 void opcontrol() {
-	pros::Controller master(pros::E_CONTROLLER_MASTER);
-	pros::Motor left_mtr(1);
-	pros::Motor right_mtr(2);
+  pros::Controller controller(pros::E_CONTROLLER_MASTER);
+  pros::Serial sendSerial(1, 57600);
 
-	while (true) {
-		pros::lcd::print(0, "%d %d %d", (pros::lcd::read_buttons() & LCD_BTN_LEFT) >> 2,
-		                 (pros::lcd::read_buttons() & LCD_BTN_CENTER) >> 1,
-		                 (pros::lcd::read_buttons() & LCD_BTN_RIGHT) >> 0);
-		int left = master.get_analog(ANALOG_LEFT_Y);
-		int right = master.get_analog(ANALOG_RIGHT_Y);
+  while (true) {
+    int leftY = controller.get_analog(ANALOG_LEFT_Y);
+    // Convert leftY to a buffer
+    uint8_t buffer = static_cast<uint8_t>(leftY);
 
-		left_mtr = left;
-		right_mtr = right;
+    // Write the buffer to sendSerial
+    sendSerial.write(&buffer, 1);
 
-		pros::delay(20);
-	}
+    // Display info
+    std::cout << "Sent: " << std::bitset<8>(buffer) << std::endl;
+    pros::delay(1);
+  }
 }
+
+/** RECEIVE CODE
+void opcontrol() {
+  pros::Serial receiveSerial(2, 57600);
+  pros::Motor motor(20, false);
+
+  while (true) {
+    while (receiveSerial.get_read_avail() == 0) {
+      int delay = 1;
+      pros::delay(delay);
+    };
+
+    std::bitset<8> readData(receiveSerial.read_byte());
+    std::string readDataString = readData.to_string();
+    int receivedNumber = std::stoi(readDataString, nullptr, 2);
+    if (receivedNumber > 127) {
+      receivedNumber -= 256;
+    }
+    std::cout << "Received Data: " << readDataString << "\n";
+    std::cout << "Received Number: " << receivedNumber << "\n";
+
+    motor = receivedNumber;
+
+    pros::screen::print(TEXT_MEDIUM, 0, "Received: %d", readDataString);
+    pros::screen::print(TEXT_MEDIUM, 1, "leftY: %d", receivedNumber);
+  }
+}
+*/
