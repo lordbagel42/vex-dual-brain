@@ -1,24 +1,6 @@
 #include "main.h"
-#include "pros/link.h"
 #include "pros/serial.hpp"
-#include <bitset>
 #include <iostream>
-
-/**
- * A callback function for LLEMU's center button.
- *
- * When this callback is fired, it will toggle line 2 of the LCD text between
- * "I was pressed!" and nothing.
- */
-void on_center_button() {
-  static bool pressed = false;
-  pressed = !pressed;
-  if (pressed) {
-    pros::lcd::set_text(2, "I was pressed!");
-  } else {
-    pros::lcd::clear_line(2);
-  }
-}
 
 /**
  * Runs initialization code. This occurs as soon as the program is started.
@@ -26,7 +8,11 @@ void on_center_button() {
  * All other competition modes are blocked by initialize; it is recommended
  * to keep execution time for this mode under a few seconds.
  */
-void initialize() {}
+void initialize() {
+  std::cout << "**********" << std::endl;
+  std::cout << "*   SEND   *" << std::endl;
+  std::cout << "**********" << std::endl;
+}
 
 /**
  * Runs while the robot is in the disabled state of Field Management System or
@@ -66,44 +52,96 @@ void opcontrol() {
   pros::Controller controller(pros::E_CONTROLLER_MASTER);
   pros::Serial sendSerial(1, 57600);
 
+  const int BUFFER_SIZE = 256; // Increased buffer size for longer IDs
+  uint8_t buffer[BUFFER_SIZE];
+  int dataIndex = 0;
+
   while (true) {
-    int leftY = controller.get_analog(ANALOG_LEFT_Y);
-    // Convert leftY to a buffer
-    uint8_t buffer = static_cast<uint8_t>(leftY);
+    // Define IDs
+    const char *ids[] = {"lY", "lX", "rX"};
+    // Read input variables
+    int analogValues[] = {controller.get_analog(ANALOG_LEFT_Y),
+                          controller.get_analog(ANALOG_LEFT_X),
+                          controller.get_analog(ANALOG_RIGHT_X)};
+
+    // Store data in the buffer
+    for (int i = 0; i < 3; ++i) {
+      for (const char *p = ids[i]; *p; ++p) { // Store the ID
+        buffer[dataIndex++] = static_cast<uint8_t>(*p);
+      }
+      buffer[dataIndex++] = '\0'; // Null-terminate the string
+      buffer[dataIndex++] =
+          static_cast<uint8_t>(analogValues[i]); // Store the value
+    }
 
     // Write the buffer to sendSerial
-    sendSerial.write(&buffer, 1);
+    sendSerial.write(buffer, dataIndex);
 
-    // Display info
-    std::cout << "Sent: " << std::bitset<8>(buffer) << std::endl;
-    pros::delay(1);
+    // Display info (optional)
+    std::cout << "Sent data:\n";
+    int i = 0;
+    while (i < dataIndex) {
+      int j = i;
+      while (buffer[j] != '\0') { // Read until null byte
+        std::cout << static_cast<char>(buffer[j++]);
+      }
+      std::cout << ": " << static_cast<int>(buffer[j + 1]) << "\n";
+      i = j + 2; // Move past the null byte and the data byte
+    }
+
+    dataIndex = 0;   // Reset the dataIndex for the next iteration
+    pros::delay(10); // Delay to prevent too rapid sending
   }
 }
 
-/** RECEIVE CODE
+/**
+RECEIVE CODE
 void opcontrol() {
-  pros::Serial receiveSerial(2, 57600);
-  pros::Motor motor(20, false);
+    pros::Serial receiveSerial(2, 57600);
+    pros::Motor motor(20, false);
 
-  while (true) {
-    while (receiveSerial.get_read_avail() == 0) {
-      int delay = 1;
-      pros::delay(delay);
-    };
+    int leftY = 0, leftX = 0;
+    bool leftY_ready = false, leftX_ready = false;
 
-    std::bitset<8> readData(receiveSerial.read_byte());
-    std::string readDataString = readData.to_string();
-    int receivedNumber = std::stoi(readDataString, nullptr, 2);
-    if (receivedNumber > 127) {
-      receivedNumber -= 256;
+    const int BUFFER_SIZE = 256;  // Buffer size to handle incoming data
+    char buffer[BUFFER_SIZE];
+    int bufferIndex = 0;
+
+    while (true) {
+        while (receiveSerial.get_read_avail() == 0) {
+            pros::delay(1);
+        };
+
+        while (receiveSerial.get_read_avail() > 0 && bufferIndex < BUFFER_SIZE - 1) {
+            buffer[bufferIndex++] = receiveSerial.read_byte();
+            buffer[bufferIndex] = '\0';  // Always null-terminate
+
+            // Check for complete data (ID + value)
+            if (bufferIndex > 2 && buffer[bufferIndex - 1] >= 128) {
+                char id[3] = { buffer[bufferIndex - 3], buffer[bufferIndex - 2], '\0' };
+                int value = static_cast<int>(buffer[bufferIndex - 1]);
+
+                std::cout << value << std::endl;
+
+                //if (value > 127) value -= 256;  // Handle signed byte conversion
+
+                if (strcmp(id, "lY") == 0) {
+                    leftY = value;
+                    leftY_ready = true;
+                } else if (strcmp(id, "lX") == 0) {
+                    leftX = value;
+                    leftX_ready = true;
+                }
+
+                // Process when both are ready
+                if (leftY_ready && leftX_ready) {
+                    // motor.move(leftX);  // Example action using leftX
+                    leftY_ready = leftX_ready = false;  // Reset flags
+                }
+
+                bufferIndex = 0;  // Reset buffer for the next ID-value pair
+            }
+        }
     }
-    std::cout << "Received Data: " << readDataString << "\n";
-    std::cout << "Received Number: " << receivedNumber << "\n";
-
-    motor = receivedNumber;
-
-    pros::screen::print(TEXT_MEDIUM, 0, "Received: %d", readDataString);
-    pros::screen::print(TEXT_MEDIUM, 1, "leftY: %d", receivedNumber);
-  }
 }
 */
