@@ -1,147 +1,173 @@
 #include "main.h"
+#include "pros/apix.h"
 #include "pros/serial.hpp"
+#include <bitset>
 #include <iostream>
 
-/**
- * Runs initialization code. This occurs as soon as the program is started.
- *
- * All other competition modes are blocked by initialize; it is recommended
- * to keep execution time for this mode under a few seconds.
- */
-void initialize() {
-  std::cout << "**********" << std::endl;
-  std::cout << "*   SEND   *" << std::endl;
-  std::cout << "**********" << std::endl;
-}
+lv_obj_t *myButton;
+lv_obj_t *myButtonLabel;
+lv_obj_t *myLabel;
 
-/**
- * Runs while the robot is in the disabled state of Field Management System or
- * the VEX Competition Switch, following either autonomous or opcontrol. When
- * the robot is enabled, this task will exit.
- */
-void disabled() {}
+lv_style_t myButtonStyleREL; // released style
+lv_style_t myButtonStylePR;  // pressed style
 
-/**
- * Runs after initialize(), and before autonomous when connected to the Field
- * Management System or the VEX Competition Switch. This is intended for
- * competition-specific initialization routines, such as an autonomous selector
- * on the LCD.
- *
- * This task will exit when the robot is enabled and autonomous or opcontrol
- * starts.
- */
-void competition_initialize() {}
-
-/**
- * Runs the user autonomous code. This function will be started in its own task
- * with the default priority and stack size whenever the robot is enabled via
- * the Field Management System or the VEX Competition Switch in the autonomous
- * mode. Alternatively, this function may be called in initialize or opcontrol
- * for non-competition testing purposes.
- *
- * If the robot is disabled or communications is lost, the autonomous task
- * will be stopped. Re-enabling the robot will restart the task, not re-start it
- * from where it left off.
- */
-void autonomous() {}
-
-/**
-SEND CODE
- */
-void opcontrol() {
+void sendSerial() {
   pros::Controller controller(pros::E_CONTROLLER_MASTER);
   pros::Serial sendSerial(1, 57600);
-
-  const int BUFFER_SIZE = 256; // Increased buffer size for longer IDs
-  uint8_t buffer[BUFFER_SIZE];
-  int dataIndex = 0;
+  uint8_t buffer[8];
 
   while (true) {
-    // Define IDs
-    const char *ids[] = {"lY", "lX", "rX"};
-    // Read input variables
-    int analogValues[] = {controller.get_analog(ANALOG_LEFT_Y),
-                          controller.get_analog(ANALOG_LEFT_X),
-                          controller.get_analog(ANALOG_RIGHT_X)};
+    // Read controller values
+    int leftY = controller.get_analog(ANALOG_LEFT_Y);
+    int leftX = controller.get_analog(ANALOG_LEFT_X);
+    int rightY = controller.get_analog(ANALOG_RIGHT_Y);
+    int rightX = controller.get_analog(ANALOG_RIGHT_X);
+    int randomNum = rand() % 65536;
 
-    // Store data in the buffer
-    for (int i = 0; i < 3; ++i) {
-      for (const char *p = ids[i]; *p; ++p) { // Store the ID
-        buffer[dataIndex++] = static_cast<uint8_t>(*p);
-      }
-      buffer[dataIndex++] = '\0'; // Null-terminate the string
-      buffer[dataIndex++] =
-          static_cast<uint8_t>(analogValues[i]); // Store the value
-    }
+    // Controller is 8 bit, pad start with zeros
+    buffer[0] = 0; // High byte (unused)
+    buffer[1] = static_cast<uint8_t>(leftY);
+    buffer[2] = 0;
+    buffer[3] = static_cast<uint8_t>(leftX);
+    buffer[4] = 0;
+    buffer[5] = static_cast<uint8_t>(rightY);
+    buffer[6] = 0;
+    buffer[7] = static_cast<uint8_t>(rightX);
 
     // Write the buffer to sendSerial
-    sendSerial.write(buffer, dataIndex);
+    sendSerial.write(buffer, sizeof(buffer));
 
-    // Display info (optional)
-    std::cout << "Sent data:\n";
-    int i = 0;
-    while (i < dataIndex) {
-      int j = i;
-      while (buffer[j] != '\0') { // Read until null byte
-        std::cout << static_cast<char>(buffer[j++]);
-      }
-      std::cout << ": " << static_cast<int>(buffer[j + 1]) << "\n";
-      i = j + 2; // Move past the null byte and the data byte
+    // Display stuff for debug
+    std::cout << "Sent: ";
+    for (int i = 0; i < 8; ++i) {
+      std::cout << std::bitset<8>(buffer[i]) << " ";
     }
+    std::cout << std::endl;
 
-    dataIndex = 0;   // Reset the dataIndex for the next iteration
-    pros::delay(10); // Delay to prevent too rapid sending
+    // Screen stuff
+    pros::screen::print(TEXT_MEDIUM, 0, "leftY: %d    ", leftY);
+    pros::screen::print(TEXT_MEDIUM, 1, "leftX: %d    ", leftX);
+    pros::screen::print(TEXT_MEDIUM, 2, "rightY: %d    ", rightY);
+    pros::screen::print(TEXT_MEDIUM, 3, "rightX: %d    ", rightX);
+
+    pros::delay(1); // Don't cook the CPU
   }
 }
 
-/**
-RECEIVE CODE
-void opcontrol() {
-    pros::Serial receiveSerial(2, 57600);
-    pros::Motor motor(20, false);
+void receiveSerial() {
+  // RECEIVE
+  pros::Motor motor(20, false);
+  uint8_t buffer[8];
 
-    int leftY = 0, leftX = 0;
-    bool leftY_ready = false, leftX_ready = false;
+  pros::Serial receiveSerial(1, 57600);
 
-    const int BUFFER_SIZE = 256;  // Buffer size to handle incoming data
-    char buffer[BUFFER_SIZE];
-    int bufferIndex = 0;
+  motor.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
 
-    while (true) {
-        while (receiveSerial.get_read_avail() == 0) {
-            pros::delay(1);
-        };
-
-        while (receiveSerial.get_read_avail() > 0 && bufferIndex < BUFFER_SIZE - 1) {
-            buffer[bufferIndex++] = receiveSerial.read_byte();
-            buffer[bufferIndex] = '\0';  // Always null-terminate
-
-            // Check for complete data (ID + value)
-            if (bufferIndex > 2 && buffer[bufferIndex - 1] >= 128) {
-                char id[3] = { buffer[bufferIndex - 3], buffer[bufferIndex - 2], '\0' };
-                int value = static_cast<int>(buffer[bufferIndex - 1]);
-
-                std::cout << value << std::endl;
-
-                //if (value > 127) value -= 256;  // Handle signed byte conversion
-
-                if (strcmp(id, "lY") == 0) {
-                    leftY = value;
-                    leftY_ready = true;
-                } else if (strcmp(id, "lX") == 0) {
-                    leftX = value;
-                    leftX_ready = true;
-                }
-
-                // Process when both are ready
-                if (leftY_ready && leftX_ready) {
-                    // motor.move(leftX);  // Example action using leftX
-                    leftY_ready = leftX_ready = false;  // Reset flags
-                }
-
-                bufferIndex = 0;  // Reset buffer for the next ID-value pair
-            }
-        }
+  while (true) {
+    // Ensure there's data available to read
+    while (receiveSerial.get_read_avail() <
+           8) { // Checking for 8 bytes (4 * 16 bits)
+      pros::delay(1);
     }
+
+    // Prepare buffer
+    receiveSerial.read(buffer, 8); // Read 8 bytes in
+
+    // Only use the second byte of each pair (low byte)
+    int8_t leftY = static_cast<int8_t>(buffer[1]);
+    int8_t leftX = static_cast<int8_t>(buffer[3]);
+    int8_t rightY = static_cast<int8_t>(buffer[5]);
+    int8_t rightX = static_cast<int8_t>(buffer[7]);
+
+    // Display debug data
+    std::cout << "Received Data:\n";
+    std::cout << "leftY: " << static_cast<int>(leftY) << "\n";
+    std::cout << "leftX: " << static_cast<int>(leftX) << "\n";
+    std::cout << "rightY: " << static_cast<int>(rightY) << "\n";
+    std::cout << "rightX: " << static_cast<int>(rightX) << "\n";
+
+    motor.move(leftY);
+
+    // Screen stuff
+    pros::screen::print(TEXT_MEDIUM, 0, "leftY: %d    ", leftY);
+    pros::screen::print(TEXT_MEDIUM, 1, "leftX: %d    ", leftX);
+    pros::screen::print(TEXT_MEDIUM, 2, "rightY: %d    ", rightY);
+    pros::screen::print(TEXT_MEDIUM, 3, "rightX: %d    ", rightX);
+
+    // CPU cooking is bad
+    pros::delay(1);
+  }
 }
-*/
+
+static lv_res_t send_btn_click_action(lv_obj_t *btn) {
+  // Action for SEND button
+  // Add your code here
+  lv_obj_clean(lv_scr_act()); // Clear the screen
+  pros::Task sendSerialTask(sendSerial);
+  return LV_RES_OK;
+}
+
+static lv_res_t receive_btn_click_action(lv_obj_t *btn) {
+  // Action for RECEIVE button
+  // Add your code here
+  lv_obj_clean(lv_scr_act()); // Clear the screen
+  pros::Task receiveSerialTask(receiveSerial);
+  return LV_RES_OK;
+}
+
+void initialize() {
+  lv_style_copy(&myButtonStyleREL, &lv_style_plain);
+  myButtonStyleREL.body.main_color = LV_COLOR_MAKE(150, 0, 0);
+  myButtonStyleREL.body.grad_color = LV_COLOR_MAKE(0, 0, 150);
+  myButtonStyleREL.body.radius = 0;
+  myButtonStyleREL.text.color = LV_COLOR_MAKE(255, 255, 255);
+
+  lv_style_copy(&myButtonStylePR, &lv_style_plain);
+  myButtonStylePR.body.main_color = LV_COLOR_MAKE(255, 0, 0);
+  myButtonStylePR.body.grad_color = LV_COLOR_MAKE(0, 0, 255);
+  myButtonStylePR.body.radius = 0;
+  myButtonStylePR.text.color = LV_COLOR_MAKE(255, 255, 255);
+
+  // Create SEND button
+  lv_obj_t *sendButton = lv_btn_create(lv_scr_act(), NULL);
+  lv_obj_set_free_num(sendButton, 0);
+  lv_btn_set_action(sendButton, LV_BTN_ACTION_CLICK, send_btn_click_action);
+  lv_btn_set_style(sendButton, LV_BTN_STYLE_REL, &myButtonStyleREL);
+  lv_btn_set_style(sendButton, LV_BTN_STYLE_PR, &myButtonStylePR);
+  lv_obj_set_size(sendButton, LV_HOR_RES / 2, LV_VER_RES);
+  lv_obj_align(sendButton, NULL, LV_ALIGN_IN_TOP_LEFT, 0, 0);
+
+  lv_obj_t *sendButtonLabel = lv_label_create(sendButton, NULL);
+  lv_label_set_text(sendButtonLabel, "SEND");
+
+  // Create RECEIVE button
+  lv_obj_t *receiveButton = lv_btn_create(lv_scr_act(), NULL);
+  lv_obj_set_free_num(receiveButton, 1);
+  lv_btn_set_action(receiveButton, LV_BTN_ACTION_CLICK,
+                    receive_btn_click_action);
+  lv_btn_set_style(receiveButton, LV_BTN_STYLE_REL, &myButtonStyleREL);
+  lv_btn_set_style(receiveButton, LV_BTN_STYLE_PR, &myButtonStylePR);
+  lv_obj_set_size(receiveButton, LV_HOR_RES / 2, LV_VER_RES);
+  lv_obj_align(receiveButton, NULL, LV_ALIGN_IN_TOP_RIGHT, 0, 0);
+
+  lv_obj_t *receiveButtonLabel = lv_label_create(receiveButton, NULL);
+  lv_label_set_text(receiveButtonLabel, "RECEIVE");
+
+  // myLabel = lv_label_create(lv_scr_act(), NULL);
+  // lv_label_set_text(myLabel, "Button has not been clicked yet");
+  // lv_obj_align(myLabel, NULL, LV_ALIGN_IN_LEFT_MID, 10, 0);
+}
+
+void disabled() {}
+
+void competition_initialize() {}
+
+void autonomous() {}
+
+void serialSelector() {}
+
+void opcontrol() {
+  while (true) {
+    pros::delay(20);
+  }
+}

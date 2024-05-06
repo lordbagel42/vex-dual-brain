@@ -1,7 +1,7 @@
 {
   "py/object": "pros.conductor.project.Project",
   "py/state": {
-    "project_name": "SEND",
+    "project_name": "SERIAL",
     "target": "v5",
     "templates": {
       "kernel": {
